@@ -1,0 +1,92 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- HELPER FUNCTIONS ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasRole(roleCollection) {
+      return isSignedIn() && exists(/databases/$(database)/documents/$(roleCollection)/$(request.auth.uid));
+    }
+
+    function isFleetManager() { return hasRole('roles_fleetManagers'); }
+    function isDispatcher() { return hasRole('roles_dispatchers'); }
+    function isSafetyOfficer() { return hasRole('roles_safetyOfficers'); }
+    function isFinancialAnalyst() { return hasRole('roles_financialAnalysts'); }
+
+    function documentExists() {
+      return resource != null;
+    }
+
+    // --- COLLECTION RULES ---
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false; 
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    match /{roleColl}/{userId} {
+      function isRoleCollection() {
+        return roleColl in ['roles_fleetManagers', 'roles_dispatchers', 'roles_safetyOfficers', 'roles_financialAnalysts'];
+      }
+      allow get: if isRoleCollection() && isSignedIn();
+      allow list: if isRoleCollection() && (isFleetManager() || isOwner(userId));
+      allow create, update: if isRoleCollection() && isOwner(userId);
+      allow delete: if false; 
+    }
+
+    match /static_roles/{roleId} {
+      allow get, list: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /vehicles/{vehicleId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFleetManager();
+      allow update, delete: if isFleetManager() && documentExists();
+    }
+
+    match /drivers/{driverId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFleetManager() || isSafetyOfficer();
+      allow update: if (isFleetManager() || isSafetyOfficer()) && documentExists();
+      allow delete: if isFleetManager() && documentExists();
+    }
+
+    match /trips/{tripId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFleetManager() || isDispatcher();
+      allow update: if (isFleetManager() || isDispatcher()) && documentExists();
+      allow delete: if isFleetManager() && documentExists();
+    }
+
+    match /maintenance_logs/{logId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFleetManager();
+      allow update, delete: if isFleetManager() && documentExists();
+    }
+
+    match /fuel_logs/{logId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFleetManager() || isFinancialAnalyst();
+      allow update, delete: if (isFleetManager() || isFinancialAnalyst()) && documentExists();
+    }
+
+    match /expenses/{expenseId} {
+      allow get, list: if isSignedIn();
+      allow create: if isFleetManager() || isFinancialAnalyst();
+      allow update, delete: if (isFleetManager() || isFinancialAnalyst()) && documentExists();
+    }
+  }
+}
